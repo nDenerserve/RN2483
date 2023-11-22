@@ -15,7 +15,7 @@ import (
   "fmt"
   "time"
 
-  "github.com/bullettime/rn2483"
+  "github.com/ndenerserve/rn2483"
 )
 
 func main() {
