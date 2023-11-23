@@ -30,7 +30,7 @@ import (
 
 func TestMacResetWrongArgument(t *testing.T) {
 	for i := uint16(0); i < maxUint16; i++ {
-		if i != 433 && i != 868 && MacReset(i) != false {
+		if i != 433 && i != 868 && MacReset(i) != nil {
 			t.Errorf("MacReset(%v) returned true while the band <> 433 and 868", i)
 			if testing.Short() {
 				break
@@ -47,11 +47,11 @@ func TestMacResetWriteError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacReset(433) != false {
+	if MacReset(433) != nil {
 		t.Errorf("MacReset(%v) returned true while the serial write failed", 433)
 	}
 
-	if MacReset(868) != false {
+	if MacReset(868) != nil {
 		t.Errorf("MacReset(%v) returned true while the serial write failed", 868)
 	}
 }
@@ -69,11 +69,11 @@ func TestMacResetReadError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacReset(433) != false {
+	if MacReset(433) != nil {
 		t.Errorf("MacReset(%v) returned true while the serial read returned 0 bytes", 433)
 	}
 
-	if MacReset(868) != false {
+	if MacReset(868) != nil {
 		t.Errorf("MacReset(%v) returned true while the serial read returned 0 bytes", 868)
 	}
 }
@@ -91,11 +91,11 @@ func TestMacResetReadInvalidParam(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacReset(433) != false {
+	if MacReset(433) != nil {
 		t.Errorf("MacReset(%v) returned true while the serial read returned invalid_param", 433)
 	}
 
-	if MacReset(868) != false {
+	if MacReset(868) != nil {
 		t.Errorf("MacReset(%v) returned true while the serial read returned invalid_param", 868)
 	}
 }
@@ -113,11 +113,11 @@ func TestMacResetSuccess(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacReset(433) != true {
+	if MacReset(433) != nil {
 		t.Errorf("MacReset(%v) returned false while the serial read returned ok", 433)
 	}
 
-	if MacReset(868) != true {
+	if MacReset(868) != nil {
 		t.Errorf("MacReset(%v) returned false while the serial read returned ok", 868)
 	}
 }
@@ -130,7 +130,9 @@ func TestMacPauseWriteError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacPause() != 0 {
+	macpause, _ := MacPause()
+
+	if macpause != 0 {
 		t.Errorf("MacPause() returned non zero value while the serial write failed")
 	}
 }
@@ -148,7 +150,9 @@ func TestMacPauseReadError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacPause() != 0 {
+	macpause, _ := MacPause()
+
+	if macpause != 0 {
 		t.Errorf("MacPause() returned non zero value while the serial read failed")
 	}
 }
@@ -166,7 +170,9 @@ func TestMacPauseReadInvalidParamr(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacPause() != 0 {
+	macpause, _ := MacPause()
+
+	if macpause != 0 {
 		t.Errorf("MacPause() returned non zero value while the serial read returned invalid_param")
 	}
 }
@@ -184,7 +190,9 @@ func TestMacPauseConversionError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacPause() != 0 {
+	macpause, _ := MacPause()
+
+	if macpause != 0 {
 		t.Errorf("MacPause() returned non zero value while the conversion failed")
 	}
 }
@@ -202,7 +210,9 @@ func TestMacPauseSuccess(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacPause() == 0 {
+	macpause, _ := MacPause()
+
+	if macpause == 0 {
 		t.Errorf("MacPause() returned zero value while the serial read succeeded")
 	}
 }
@@ -215,7 +225,7 @@ func TestMacResumeWriteError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacResume() != false {
+	if MacResume() != nil {
 		t.Errorf("MacResume() returned true value while the serial write failed")
 	}
 }
@@ -233,7 +243,7 @@ func TestMacResumeReadError(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacResume() != false {
+	if MacResume() != nil {
 		t.Errorf("MacResume() returned true value while the serial read failed")
 	}
 }
@@ -251,7 +261,7 @@ func TestMacResumeSuccess(t *testing.T) {
 
 	defer resetOriginals()
 
-	if MacResume() == false {
+	if MacResume() == nil {
 		t.Errorf("MacResume() returned false while the serial read succeeded")
 	}
 }
@@ -365,11 +375,11 @@ func TestMacTxInvalidPort(t *testing.T) {
 	ports := []uint8{0, 224}
 	data := []byte("test")
 
-	if MacTx(uplinkType, ports[0], data, nil) == true {
+	if MacTx(uplinkType, ports[0], data, nil) == nil {
 		t.Errorf("MacTX(%v, %v, %v, nil) returned true with invalid port", uplinkType, ports[0], data)
 	}
 
-	if MacTx(uplinkType, ports[1], data, nil) == true {
+	if MacTx(uplinkType, ports[1], data, nil) == nil {
 		t.Errorf("MacTX(%v, %v, %v, nil) returned true with invalid port", uplinkType, ports[1], data)
 	}
 }
@@ -401,7 +411,7 @@ func TestMacTxOk(t *testing.T) {
 	port := uint8(1)
 	data := []byte("test")
 
-	if MacTx(uplinkType, port, data, nil) == false {
+	if MacTx(uplinkType, port, data, nil) != nil {
 		t.Errorf("MacTX(%v, %v, %v, nil) returned false", uplinkType, port, data)
 	}
 }
@@ -436,7 +446,7 @@ func TestMacTxOkRx(t *testing.T) {
 		t.Logf("Received message on port %v: %s", port, string(data))
 	}
 
-	if MacTx(uplinkType, port, data, callback) == false {
+	if MacTx(uplinkType, port, data, callback) != nil {
 		t.Errorf("MacTX(%v, %v, %v, callback) returned false", uplinkType, port, data)
 	}
 }

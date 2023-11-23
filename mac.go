@@ -23,87 +23,101 @@
 package rn2483
 
 import (
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
-	"github.com/pkg/errors"
-	"encoding/hex"
+)
+
+var (
+	ErrNotJoined        = errors.New("Not joined")
+	ErrInvalidPort      = errors.New("Invalid port number")
+	ErrZeroBytes        = errors.New("Trying to send zero bytes")
+	ErrTimeout          = errors.New("Timeout")
+	ErrInvalidHexData   = errors.New("Invalid hex data")
+	ErrGeneral          = errors.New("General error")
+	ErrMacTx            = errors.New("Mac tx error")
+	ErrMacResume        = errors.New("Mac resume error")
+	ErrMacReset         = errors.New("Mac reset error")
+	ErrMacPause         = errors.New("Mac pause error")
+	ErrInvalidBand      = errors.New("Invalid band selected (433 or 868)")
+	ErrInvalidParameter = errors.New("Invalid parameter")
 )
 
 type receiveCallback func(port uint8, data []byte)
 
 // MacReset will automatically reset the software LoRaWAN stack and initilize
 // it with the parameters for the selected band.
-func MacReset(band uint16) bool {
+func MacReset(band uint16) error {
 	if band != 433 && band != 868 {
 		WARN.Println("mac reset error: invalid band selected (433 or 868)")
-		return false
+		return errors.Join(ErrMacReset, ErrInvalidBand)
 	}
 
 	err := serialWrite(fmt.Sprintf("mac reset %v", band))
 	if err != nil {
 		WARN.Println("mac reset error:", err)
-		return false
+		return errors.Join(ErrMacReset, err)
 	}
 
 	n, answer := serialRead()
 	if n == 0 || string(sanitize(answer)) == invalidParameter {
 		WARN.Println("mac reset error: invalid parameter")
-		return false
+		return errors.Join(ErrMacReset, ErrInvalidParameter)
 	}
 
 	//state.macPaused = false
 
-	return true
+	return nil
 }
 
 // MacPause will pause the LoRaWAN stack functionality to allow transceiver (radio) configuration.
 // The length is the time in milliseconds the stack will be paused, with a maximum of 4294967295
 // (max of uint32), is returned as an uint32.
-func MacPause() uint32 {
+func MacPause() (uint32, error) {
 	err := serialWrite("mac pause")
 	if err != nil {
 		WARN.Println("mac pause error:", err)
-		return 0
+		return 0, errors.Join(ErrMacPause, err)
 	}
 
 	n, answer := serialRead()
 	if n == 0 || string(sanitize(answer)) == invalidParameter {
 		WARN.Println("mac pause error: invalid parameter")
-		return 0
+		return 0, errors.Join(ErrMacPause, ErrInvalidParameter)
 	}
 
 	value, err := strconv.ParseUint(string(sanitize(answer)), 10, 32)
 	if err != nil {
 		WARN.Println("mac pause error:", err)
-		return 0
+		return 0, errors.Join(ErrMacPause, err)
 	}
 
 	//state.macPaused = true
 	//state.macPausedEnd = time.Now().Add(time.Duration(value) * time.Millisecond)
 
-	return uint32(value)
+	return uint32(value), nil
 }
 
 // MacResume will resume the LoRaWAN stack functionality, in order to continue normal
 // functionality after being paused.
-func MacResume() bool {
+func MacResume() error {
 	err := serialWrite("mac resume")
 	if err != nil {
 		WARN.Println("mac resume error:", err)
-		return false
+		return errors.Join(ErrMacResume, err)
 	}
 
 	n, answer := serialRead()
 	if n == 0 || string(sanitize(answer)) == invalidParameter {
-		WARN.Println("mac resume error: invalid parameter")
-		return false
+		return errors.Join(err, ErrInvalidParameter)
 	}
 
 	//state.macPaused = false
 
-	return true
+	return nil
 }
 
 // The length is passed in milliseconds.
@@ -143,9 +157,9 @@ func MacJoin(mode string) bool {
 
 	for {
 		select {
-		case <- timeout:
+		case <-timeout:
 			return false
-		case <- tick:
+		case <-tick:
 			n, answer = serialRead()
 
 			if n != 0 {
@@ -168,15 +182,15 @@ func MacJoin(mode string) bool {
 // The receiveCallback function passed is responsible to handle the received
 // answer from the server. If no answers are expected, nil can be passed as the
 // callback argument.
-func MacTx(confirmed bool, port uint8, data []byte, callback receiveCallback) bool {
+func MacTx(confirmed bool, port uint8, data []byte, callback receiveCallback) error {
 	if port < 1 || port > 223 {
 		WARN.Printf("mac tx error: invalid port number (%v)", port)
-		return false
+		return ErrInvalidPort
 	}
 
 	if len(data) == 0 {
 		WARN.Println("mac tx error: trying to send zero bytes")
-		return false
+		return ErrZeroBytes
 	}
 
 	uplinkType := UNCONFIRMED
@@ -188,13 +202,20 @@ func MacTx(confirmed bool, port uint8, data []byte, callback receiveCallback) bo
 	err := serialWrite(fmt.Sprintf("mac tx %s %v %X", uplinkType, port, data))
 	if err != nil {
 		WARN.Println("mac tx error:", err)
-		return false
+		return err
 	}
 
 	n, answer := serialRead()
+
 	if n == 0 || string(sanitize(answer)) != "ok" {
-		WARN.Println("mac tx error:", string(sanitize(answer)))
-		return false
+		s := string(sanitize(answer))
+		WARN.Println("mac tx error:", s)
+		if s == "not_joined" {
+			return ErrNotJoined
+		} else {
+			return errors.Join(ErrMacTx, errors.New(s))
+		}
+
 	}
 
 	timeout := time.After(time.Second * 15)
@@ -202,19 +223,22 @@ func MacTx(confirmed bool, port uint8, data []byte, callback receiveCallback) bo
 
 	for {
 		select {
-		case <- timeout:
+		case <-timeout:
 			WARN.Println("timed out")
-			return false
-		case <- tick:
+			return ErrTimeout
+		case <-tick:
 			n, answer = serialRead()
 			s := string(sanitize(answer))
 
 			if n != 0 {
 				if s == "mac_err" || s == "invalid_data_len" {
 					WARN.Printf("mac tx error: %s", s)
-					return false
+					return errors.Join(ErrMacTx, errors.New(s))
+				} else if s == "not_joined" {
+					WARN.Printf("mac tx error: %s", s)
+					return ErrNotJoined
 				} else if s == "mac_tx_ok" {
-					return true
+					return nil
 				} else if strings.HasPrefix(s, "mac_rx") {
 					if callback != nil {
 						params := strings.Split(s, " ")
@@ -222,24 +246,41 @@ func MacTx(confirmed bool, port uint8, data []byte, callback receiveCallback) bo
 						port, err := strconv.ParseInt(params[1], 10, 8)
 						if err != nil {
 							WARN.Printf("mac_rx invalid port: %s", params[1])
-							return true
+
+							return ErrInvalidPort
 						}
 
 						decoded, err := hex.DecodeString(params[2])
 						if err != nil {
 							WARN.Printf("mac_rx invalid hex data: %s", params[2])
-							return true
+							return nil
 						}
 
 						callback(uint8(port), []byte(decoded))
 					}
-					return true
+					return nil
 				} else {
-					return false
+					return ErrGeneral
 				}
 			}
 		}
 	}
+}
+
+func MacGetStatus() string {
+	err := serialWrite("mac get status")
+	if err != nil {
+		WARN.Println("mac get status error:", err)
+		return "00000000"
+	}
+
+	n, answer := serialRead()
+	fmt.Println("Mac status: " + string(sanitize(answer)))
+	if n != 0 {
+		return string(sanitize(answer))
+	}
+
+	return "00000000"
 }
 
 // MacGetDeviceAddress will return the current end device address of the module.
@@ -269,7 +310,7 @@ func MacSetDeviceAddress(address string) error {
 
 	err := serialWrite(fmt.Sprintf("mac set devaddr %s", address))
 	if err != nil {
-		return errors.Wrap(err, "could not set device address")
+		return errors.Join(err, errors.New("could not set device address"))
 	}
 
 	n, answer := serialRead()
@@ -307,7 +348,7 @@ func MacSetDeviceEUI(eui string) error {
 
 	err := serialWrite(fmt.Sprintf("mac set deveui %s", eui))
 	if err != nil {
-		return errors.Wrap(err, "could not set device eui")
+		return errors.Join(err, errors.New("could not set device eui"))
 	}
 
 	n, answer := serialRead()
@@ -345,7 +386,7 @@ func MacSetApplicationEUI(eui string) error {
 
 	err := serialWrite(fmt.Sprintf("mac set appeui %s", eui))
 	if err != nil {
-		return errors.Wrap(err, "could not set application eui")
+		return errors.Join(err, errors.New("could not set application eui"))
 	}
 
 	n, answer := serialRead()
@@ -365,7 +406,7 @@ func MacSetNetworkSessionKey(key string) error {
 
 	err := serialWrite(fmt.Sprintf("mac set nwkskey %s", key))
 	if err != nil {
-		return errors.Wrap(err, "could not set network session key")
+		return errors.Join(err, errors.New("could not set network session key"))
 	}
 
 	n, answer := serialRead()
@@ -385,7 +426,7 @@ func MacSetApplicationSessionKey(key string) error {
 
 	err := serialWrite(fmt.Sprintf("mac set appskey %s", key))
 	if err != nil {
-		return errors.Wrap(err, "could not set application session key")
+		return errors.Join(err, errors.New("could not set application session key"))
 	}
 
 	n, answer := serialRead()
@@ -405,7 +446,7 @@ func MacSetApplicationKey(key string) error {
 
 	err := serialWrite(fmt.Sprintf("mac set appkey %s", key))
 	if err != nil {
-		return errors.Wrap(err, "could not set application key")
+		return errors.Join(err, errors.New("could not set application key"))
 	}
 
 	n, answer := serialRead()
@@ -450,7 +491,7 @@ func MacSetDataRate(dr uint8) error {
 
 	err := serialWrite(fmt.Sprintf("mac set dr %v", dr))
 	if err != nil {
-		return errors.Wrap(err, "could not set data rate")
+		return errors.Join(err, errors.New("could not set data rate"))
 	}
 
 	n, answer := serialRead()
@@ -495,7 +536,7 @@ func MacSetPowerIndex(index uint8) error {
 
 	err := serialWrite(fmt.Sprintf("mac set pwridx %v", index))
 	if err != nil {
-		return errors.Wrap(err, "could not set power index")
+		return errors.Join(err, errors.New("could not set power index"))
 	}
 
 	n, answer := serialRead()
@@ -537,7 +578,7 @@ func MacSetADR(adr bool) error {
 
 	err := serialWrite(fmt.Sprintf("mac set adr %s", state))
 	if err != nil {
-		return errors.Wrap(err, "could not set adaptive data rate")
+		return errors.Join(err, errors.New("could not set adaptive data rate"))
 	}
 
 	n, answer := serialRead()
@@ -552,7 +593,7 @@ func MacSetADR(adr bool) error {
 func MacSetLinkCheck(interval uint16) error {
 	err := serialWrite(fmt.Sprintf("mac set linkchk %v", interval))
 	if err != nil {
-		return errors.Wrap(err, "could not set link check")
+		return errors.Join(err, errors.New("could not set link check"))
 	}
 
 	n, answer := serialRead()
@@ -609,7 +650,7 @@ func MacSetChannelFrequency(channelID uint8, frequency uint32) error {
 
 	err := serialWrite(fmt.Sprintf("mac set ch freq %v %v", channelID, frequency))
 	if err != nil {
-		return errors.Wrap(err, "could not set channel frequency")
+		return errors.Join(err, errors.New("could not set channel frequency"))
 	}
 
 	n, answer := serialRead()
@@ -665,7 +706,7 @@ func MacSetChannelDutyCycle(channelID uint8, dcycle float32) error {
 
 	err := serialWrite(fmt.Sprintf("mac set ch dcycle %v %v", channelID, uint16(value)))
 	if err != nil {
-		return errors.Wrap(err, "could not set channel duty cycle")
+		return errors.Join(err, errors.New("could not set channel duty cycle"))
 	}
 
 	n, answer := serialRead()
@@ -718,7 +759,7 @@ func MacSetChannelStatus(channelID uint8, status bool) error {
 
 	err := serialWrite(fmt.Sprintf("mac set ch dcycle %v %s", channelID, state))
 	if err != nil {
-		return errors.Wrap(err, "could not set channel status")
+		return errors.Join(err, errors.New("could not set channel status"))
 	}
 
 	n, answer := serialRead()
