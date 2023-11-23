@@ -1,4 +1,4 @@
-module github.com/nDenerserve/rn2483
+module github.com/nDenerserve/RN2483
 
 go 1.21.4
 
